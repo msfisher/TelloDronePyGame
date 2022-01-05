@@ -1,6 +1,4 @@
-import sys
 import time
-
 from djitellopy import tello
 import pygame
 
@@ -8,28 +6,19 @@ import pygame
 pygame.init()
 
 # create window for the drone camera images to be displayed in
-screenWidth  = 600
-screenHeight = 600
+screenWidth  = 300
+screenHeight = 300
 screenSize = (screenWidth, screenHeight)
 droneWin = pygame.display.set_mode(screenSize)
 pygame.display.set_caption("Tello Drone Remote Viewer")
 
-# create drone object, connect to it, turn on streaming, hook a frame to the stream
-# in the main loop call <objectname>>.frame to get the actual frame received
-drone = tello.Tello()
-drone.connect()
-drone.streamon()
-readFrame = drone.get_frame_read()
-
-# Frames Per Second constant to control updates to window and what size
-# to scale the image from the drone
-FPS = 60
-imageScale = (screenWidth, screenHeight)
-lrVel  = 0      # Left and Right Velocity
-fbVel  = 0      # Forward and Backward Velocity
-udVel  = 0      # Up and Down Velocity
-yawVel = 0      # Yaw Velocity
-landing = True  # Drone on ground or in flight
+drone = tello.Tello()                       # Create drone object
+drone.connect()                             # connect to the drone
+drone.streamon()                            # turn on video stream
+readFrame = drone.get_frame_read()          # hook frame to the stream
+imageScale = (screenWidth, screenHeight)    # amount to scale image from drone
+SPEED = 50                                  # velocity of drone
+SLEEP_TIME = 1                              # how long to sleep between commands
 
 
 # function to draw image from drone onto window.
@@ -39,75 +28,84 @@ landing = True  # Drone on ground or in flight
 # 4) BLIT the image on the screen
 # 5) update the display
 def updateWindow(droneImage):
-    droneWin.fill((0,0,0))
+    droneWin.fill((0, 0, 0))
     frame = pygame.surfarray.make_surface(droneImage)
     frame = pygame.transform.rotate(pygame.transform.scale(frame, imageScale), 270)
     droneWin.blit(frame,(0,0))
     pygame.display.update()
 
 
-# function to move the drone based on user's key presses
-def moveDrone(keysPressed):
-    if (keysPressed[pygame.K_w]):
-        udVel = 50                      # Move Up
-    if (keysPressed[pygame.K_a]):
-        yawVel = -50                    # Rotate counter clockwise
-    if (keysPressed[pygame.K_d]):
-        yawVel = 50                     # Rotate clockwise
-    if (keysPressed[pygame.K_s]):
-        udVel = -50                     # Move Down
-    if(keysPressed[pygame.K_q]):
-        landing = True                  # Land the Drone
-    if (keysPressed[pygame.K_t]):
-        if(landing):
-            landing = False
-            drone.takeoff()
-            time.sleep(2)
-    if (keysPressed[pygame.K_LEFT]):
-        lrVel = -50                     # Move Left
-    if (keysPressed[pygame.K_RIGHT]):
-        lrVel = 50                      # Move Right
-    if (keysPressed[pygame.K_UP]):
-        fbVel = 50                      # Move Forward
-    if (keysPressed[pygame.K_DOWN]):
-        fbVel = -50                     # Move Backward
-
-    # if the drone is not on the ground then send the command
-    if(not landing):
-        drone.send_rc_control(lrVel,fbVel,udVel,yawVel)
-        time.sleep(2)
+# function to command the drone based on arguments passed
+# lr = left or right velocity
+# fb = forward or backward velocity
+# ud = upward or downward velocity
+# yaw = rotational velocity
+def moveDrone(lr, fb, ud, yaw):
+    drone.send_rc_control(lr, fb, ud, yaw)
+    time.sleep(SLEEP_TIME)
+    drone.send_rc_control(0, 0, 0, 0)
 
 def main():
-    keepGoing = True
-    clock = pygame.time.Clock()     # create a timer to control FPS
+    keepGoing   = True  # flag to control main loop
+    landed      = True  # flag to determine if flying or not
 
     # main loop to get user's key presses and display video
     while(keepGoing):
-        clock.tick(FPS)             # control speed by only running the loop as fast as FPS
-        img = readFrame.frame       # get actual frame from the drone
+        img = readFrame.frame                       # get actual frame from the drone
+        lrVel, fbVel, udVel, yawVel = 0, 0, 0, 0    # variables to control drone velocity
 
         # check which events have occurred
         for event in pygame.event.get():
             if(event.type == pygame.QUIT):
                 keepGoing = False   # quit the loop
+            if(event.type == pygame.KEYUP):
+                if(not landed):                    # not on the ground
+                    if(event.key == pygame.K_UP):
+                        fbVel = SPEED              # translate forward
+                    if (event.key == pygame.K_DOWN):
+                        fbVel = -SPEED             # translate backward
+                    if (event.key == pygame.K_LEFT):
+                        lrVel = -SPEED             # translate left
+                    if (event.key == pygame.K_RIGHT):
+                        lrVel = SPEED              # translate right
+                    if (event.key == pygame.K_w):
+                        udVel = SPEED              # translate up
+                    if (event.key == pygame.K_s):
+                        udVel = -SPEED             # translate down
+                    if (event.key == pygame.K_a):
+                        yawVel = -SPEED            # rotate counter clockwise
+                    if (event.key == pygame.K_d):
+                        yawVel = SPEED             # rotate clockwise
+                    if (event.key == pygame.K_q):
+                        landed = True              # land
+                        drone.send_rc_control(0, 0, 0, 0)
+                        time.sleep(SLEEP_TIME)
+                        drone.land()
+                # while on ground only command that works is taking off
+                else:
+                    if (event.key == pygame.K_t):
+                        landed = False
+                        drone.takeoff()
+                        time.sleep(SLEEP_TIME)
+
+                # translate the drone based on velocities set in variables
+                # only move the drone if user has pressed a key
+                moveDrone(lrVel, fbVel, udVel, yawVel)
         # end of for loop grabbing window events
 
-        # process the key presses
-        keysPressed = pygame.key.get_pressed()
-        if(keepGoing):
-            moveDrone(keysPressed)
-            updateWindow(img)
+        updateWindow(img)
     # end of while loop
 
-    # Shutting down, so if flying then stop and land
-    if(not landing):
+    # Shutting down, so if flying then stop flying and land
+    if(not landed):
         drone.send_rc_control(0,0,0,0)
-        time.sleep(2)
+        time.sleep(SLEEP_TIME)
         drone.land()
-    drone.streamoff()
-    pygame.display.quit()
-    pygame.quit()
+    drone.streamoff()       # turn off stream
+    pygame.display.quit()   # kill the display
+    pygame.quit()           # shutdown pygame
 
+    # display the battery charge when closing down
     print(f"Battery: {drone.get_battery()}")
 # end of main function
 
